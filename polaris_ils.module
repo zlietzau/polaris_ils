@@ -192,13 +192,14 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 	//IF NOT SUCCESSFULLY LOGGED IN, IGNORE 
 	else {
 		$allowlogin = false;
-		//LET ADMINS IN
+		//LET ADMINS IN EVEN IF NO CORRESPONDING POLARIS LOGIN INFO
 		if ($form_state['uid']) {
 			$user = user_load($form_state['uid']);
 			if (user_access('administer site configuration', $user)) {
 				$allowlogin = true;	
 			}
 		}	
+		// DON'T LET OTHERS IN IF THEIR POLARIS LOGIN DOESN'T MATCH
 		if (!$allowlogin) {
 			form_set_error("name", "Invalid credentials - please try again");
 		}
