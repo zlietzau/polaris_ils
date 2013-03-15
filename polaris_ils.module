@@ -1,0 +1,239 @@
+<?php
+
+function polaris_ils_menu() {
+  $items['admin/config/people/polaris_ils'] = array(
+    'title' => 'Polaris ILS API',
+    'description' => 'Configure site information for the POLARIS ILS module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('polaris_ils_settings_form'),
+    'access arguments' => array('access administration pages'),
+  );
+  return $items;
+}
+
+function polaris_ils_settings_form_submit($form, $form_state) {
+  // Set module variables to reflect submitted items.
+  system_settings_form_submit($form, $form_state);
+}
+function polaris_ils_settings_form($form, $form_state) {
+	
+	//SET UP CREDENTIAL & URL GROUPS	
+  $form['credentials'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Polaris API Credentials',
+  );
+    $form['urlinfo'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Polaris URL Information',
+  );
+  $form['patroninfo'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Patron Information Settings',
+  
+  );
+  
+  
+  $form['credentials']['polaris_ils_access_id'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Polaris Access ID',
+    '#default_value' => variable_get('polaris_ils_access_id', ''),
+    '#required' => TRUE,
+    
+  );
+  $form['credentials']['polaris_access_key'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Polaris Access Key',
+    '#default_value' => variable_get('polaris_access_key', ''),
+    '#required' => TRUE,
+    
+  );
+  
+  $form['urlinfo']['polaris_url'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Polaris URL Base',
+    '#default_value' => variable_get('polaris_url', ''),
+    '#required' => TRUE,
+    '#description' => 'Base URL for your Polaris API connection - this could be a local address',
+  );  
+
+  $form['urlinfo']['polaris_url2'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Secondary Polaris URL Base',
+    '#default_value' => variable_get('polaris_url2', ''),
+    '#required' => FALSE,
+    '#description' => 'Replacement for initial URL - for some configurations this will be necessary',
+  );  
+  
+  $form['patroninfo']['polaris_username'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Username Text',
+    '#default_value' => variable_get('polaris_username', 'Username or Library Card Number'),
+    '#required' => FALSE,
+    '#description' => 'Text to be used for usernames',
+  );  
+  $form['patroninfo']['polaris_password'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Password Text',
+    '#default_value' => variable_get('polaris_password', 'Password (Default is your 4 digit birth year)'),
+    '#required' => FALSE,
+    '#description' => 'Text to be used for password field',
+  );    
+  
+  
+    $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Submit',
+  );
+  return $form;
+}
+
+
+function polaris_ils_form_alter(&$form, &$form_state, $form_id) {
+	if ($form_id == 'user_login' || $form_id == 'user_login_block') {
+		$form['name']['#title'] = variable_get('polaris_username', 'Username or Library Card Number');
+    	$form['pass']['#title'] = variable_get('polaris_password', 'Password (Default is your 4 digit birth year)');
+		
+		
+		$final_validator = array_pop($form['#validate']);
+       $form['#validate'][] = 'polaris_ils_login_validate';
+	   $form['#validate'][] = $final_validator;
+	    
+	}
+}
+
+function polaris_ils_login_validate(&$form, &$form_state) {
+	//CONNECT PATRON ID!
+	
+	$gmtdiff = (date("O")*-1)/100;
+	$gmt = time() + (60*60*$gmtdiff);
+	$thisdate = date("D, j M Y H:i:s", $gmt);
+	$thisdate .= " GMT";	
+	$userid = $form["name"]["#value"];
+	$pass = $form_state['values']["pass"];
+	$accessID = variable_get("polaris_ils_access_id");
+	$accessKey = variable_get("polaris_access_key");
+	$httpMethod = "GET";
+	$url = 'http://'.variable_get("polaris_url").'/PAPIService/REST/public/v1/1033/100/1/patron/'.$userid;
+	
+	
+	$login = polaris_ils_api_connect($accessID,
+			$accessKey,
+			$httpMethod,
+			$url,
+			$thisdate,
+		$pass);
+		
+	//IF SUCCESSFULLY LOGGED IN, GET PATRON INFORMATION	
+	if ($login) {
+		$xml = simplexml_load_string($login);
+		$barcode = $xml->PatronBarcode;
+		//print_r($xml);
+		
+		$url = 'http://paccen01/PAPIService/REST/public/v1/1033/100/1/patron/'.$barcode.'/basicdata';
+		$getinfo = polaris_ils_api_connect('drupal',
+			'11CB1DE4-0A06-43C8-951C-F5FC33B4AD36',
+			'GET',
+			$url,
+			$thisdate,
+		$pass); 
+		if ($getinfo) {
+			$xml2 = simplexml_load_string($getinfo);
+			print_r($xml2);
+			$patronID = $xml2->PatronBasicData->PatronID;
+			$firstname = $xml2->PatronBasicData->NameFirst;
+			$lastname = $xml2->PatronBasicData->NameLast;
+			$email = $xml2->PatronBasicData->EmailAddress;
+			
+			
+			$fields = array(
+				'name' => $userid, 
+				'mail' => $email,
+			  	'init' => $email, 
+			  	'pass' => $pass, 
+			  	'status' => 1, 
+			  	'access' => REQUEST_TIME, 
+			  	'roles' => array(DRUPAL_AUTHENTICATED_RID)
+			);
+			$account = user_external_load($patronID);
+			if (!$account) {
+				$account = user_save(null, $fields);
+				user_set_authmaps($account, array('authname_polaris_ils' => $patronID));				
+			}
+			else {$account = user_save($account, $fields);}
+			if ($account) {
+				$form_state['uid'] = $account->uid;
+				
+		      
+		      $id = db_merge('polaris_ils_users')
+		        ->key(array('uid' => $account->uid, 'patron_id' => $patronID))
+		        ->fields(array(
+		          'barcode' => $barcode,
+		          'lastname' => $lastname,
+		          'firstname' => $firstname,
+		        ))
+		        ->execute();
+
+
+			}
+			else {
+				drupal_set_message("Error creating your account", 'error');
+			}
+			
+			
+		}
+		else {
+			
+			drupal_set_message("Error in processing - please try again", 'error');
+			
+		}
+		
+	}
+	//IF NOT SUCCESSFULLY LOGGED IN, IGNORE 
+	else {
+		
+		form_set_error("name", "Invalid credentials - please try again");
+	}			
+	
+}
+
+
+function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $httpDate, $pwd='') 
+	{
+		//
+		// Build combined string used to create hash
+		//
+		$concat = $httpMethod . $uri . $httpDate . $pwd; 
+		//
+		// Create the hash using SHA1, the combined string and the PAPI Access Key associated with the PAPI Access ID
+		//
+		$sha1_sig = base64_encode(hash_hmac('sha1', $concat, $accessKey, true));
+    
+		//
+		// Connect to PAPI Service and validate patron
+		//
+		$ch = curl_init();
+		$headers = array( 
+				"PolarisDate: ". $httpDate, 
+				"Authorization: PWS " . $accessID . ":" . $sha1_sig 
+				);
+		$uri2 = $uri;
+		
+		if (variable_get('polaris_url2')) {
+			
+			$uri2 = str_replace(variable_get('polaris_uri'), variable_get('polaris_url2'), $uri);	
+		}
+		//curl_setopt($ch, CURLOPT_GET, 1);
+		curl_setopt($ch, CURLOPT_URL, $uri2);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers); 
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		//
+		// Display output data
+		//
+		$output = curl_exec($ch);
+		
+		return $output;
+		//$simpleXml = simplexml_load_string($output);
+		//print_r($simpleXml);
+		//return ($sha1_sig);
+	}
+

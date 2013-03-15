@@ -1,0 +1,64 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the millennium module.
+ *
+ */
+
+
+/**
+ * Implements hook_schema().
+ */
+function polaris_ils_schema() {
+  $schema['polaris_ils_users'] = array(
+    'description' => t('Polaris User Database'),
+    'fields' => array(
+      'uid' => array(
+        'description' => t('Drupal user id'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'patron_id' => array(
+        'description' => t('Polaris Patron ID'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),      
+      'barcode' => array(
+        'description' => t('Polaris Barcode'),
+        'type' => 'char',
+        'length' => 50,
+        'not null' => FALSE,
+      ),
+      'lastname' => array(
+        'description' => t('User last name'),
+        'type' => 'char',
+        'length' => 50,
+        'not null' => FALSE,
+      ),
+      'firstname' => array(
+        'description' => t('The user name. Initially this is the same as the Drupal username'),
+        'type' => 'char',
+        'length' => 50,
+        'not null' => FALSE,
+      ),
+
+    ),
+    'indexes' => array(
+      'uid' => array('uid'),
+        'patron_id' => array('patron_id'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
+function polaris_ils_uninstall() {
+  db_query('DROP TABLE {polaris_ils_users}');
+
+}
