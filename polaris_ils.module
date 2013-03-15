@@ -191,11 +191,15 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 	}
 	//IF NOT SUCCESSFULLY LOGGED IN, IGNORE 
 	else {
-		$user = user_load($form_state['uid']);
+		$allowlogin = false;
 		//LET ADMINS IN
-		if ($form_state['uid'] && user_access('administer site configuration', $user)) {
+		if ($form_state['uid']) {
+			$user = user_load($form_state['uid']);
+			if (user_access('administer site configuration', $user)) {
+				$allowlogin = true;	
+			}
 		}	
-		else {
+		if (!$allowlogin) {
 			form_set_error("name", "Invalid credentials - please try again");
 		}
 	}			
