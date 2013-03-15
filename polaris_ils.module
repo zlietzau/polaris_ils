@@ -151,11 +151,12 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 			  	'init' => $email, 
 			  	'pass' => $pass, 
 			  	'status' => 1, 
-			  	'access' => REQUEST_TIME, 
-			  	'roles' => array(DRUPAL_AUTHENTICATED_RID)
+			  
 			);
 			$account = user_external_load($patronID);
 			if (!$account) {
+				$fields['access'] = REQUEST_TIME; 
+			  	$fields['roles'] = array(DRUPAL_AUTHENTICATED_RID);
 				$account = user_save(null, $fields);
 				user_set_authmaps($account, array('authname_polaris_ils' => $patronID));				
 			}
@@ -190,8 +191,13 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 	}
 	//IF NOT SUCCESSFULLY LOGGED IN, IGNORE 
 	else {
-		
-		form_set_error("name", "Invalid credentials - please try again");
+		$user = user_load($form_state['uid']);
+		//LET ADMINS IN
+		if ($form_state['uid'] && user_access('administer site configuration', $user)) {
+		}	
+		else {
+			form_set_error("name", "Invalid credentials - please try again");
+		}
 	}			
 	
 }
@@ -226,14 +232,9 @@ function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $http
 		curl_setopt($ch, CURLOPT_URL, $uri2);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers); 
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-		//
-		// Display output data
-		//
+
 		$output = curl_exec($ch);
 		
 		return $output;
-		//$simpleXml = simplexml_load_string($output);
-		//print_r($simpleXml);
-		//return ($sha1_sig);
 	}
 
