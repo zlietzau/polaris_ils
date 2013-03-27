@@ -1,3 +1,4 @@
 name = Polaris ILS Module
 description = A module to connect with the Polaris Integrated Library System's API
 core = 7.x
+stylesheets[all][] = polaris_ils.css

@@ -1,6 +1,16 @@
 <?php
 
 function polaris_ils_menu() {
+    
+  $items['polaris_ils/polaris_iframe'] = array(
+    'page callback' => 'polaris_ils_polaris_login',
+    'access callback' => 'user_access',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );  
+
+  
+  
   $items['admin/config/people/polaris_ils'] = array(
     'title' => 'Polaris ILS API',
     'description' => 'Configure site information for the POLARIS ILS module',
@@ -8,6 +18,7 @@ function polaris_ils_menu() {
     'page arguments' => array('polaris_ils_settings_form'),
     'access arguments' => array('access administration pages'),
   );
+
   return $items;
 }
 
@@ -53,7 +64,7 @@ function polaris_ils_settings_form($form, $form_state) {
     '#title' => 'Polaris URL Base',
     '#default_value' => variable_get('polaris_url', ''),
     '#required' => TRUE,
-    '#description' => 'Base URL for your Polaris API connection - this could be a local address',
+    '#description' => 'HTTP address Polaris catalog - e.g., catalog.denverlibrary.org',
   );  
 
   $form['urlinfo']['polaris_url2'] = array(
@@ -61,8 +72,15 @@ function polaris_ils_settings_form($form, $form_state) {
     '#title' => 'Secondary Polaris URL Base',
     '#default_value' => variable_get('polaris_url2', ''),
     '#required' => FALSE,
-    '#description' => 'Replacement for initial URL - for some configurations this will be necessary',
+    '#description' => 'Base URL - might be a local URL - e.g., paccen01. This is used if necessary to have a different local and external URL for the API',
   );  
+  
+  $form['urlinfo']['polaris_login_to_catalog'] = array(
+    '#type' => 'checkbox', 
+    '#title' => 'Login to Catalog as well?', 
+    '#default_value' => variable_get('polaris_login_to_catalog', false), 
+    '#description' => 'Checking this will log the patron into the catalog in the background as well as this Drupal site.'
+  );   
   
   $form['patroninfo']['polaris_username'] = array(
     '#type' => 'textfield',
@@ -79,6 +97,8 @@ function polaris_ils_settings_form($form, $form_state) {
     '#description' => 'Text to be used for password field',
   );    
   
+
+  
   
     $form['submit'] = array(
     '#type' => 'submit',
@@ -93,6 +113,18 @@ function polaris_ils_form_alter(&$form, &$form_state, $form_id) {
     $form['name']['#title'] = variable_get('polaris_username', 'Username or Library Card Number');
       $form['pass']['#title'] = variable_get('polaris_password', 'Password (Default is your 4 digit birth year)');
     
+    if (variable_get('polaris_login_to_catalog') && variable_get('polaris_url')) {
+      global $base_url;
+      $form['polaris_iframe'] = array(
+        '#markup' => '<iframe id="polaris_iframe" src="' . $base_url . '/polaris_ils/polaris_iframe"></iframe>'     
+      );      
+      drupal_add_js(drupal_get_path('module', 'polaris_ils') . '/polaris_ils_catalog_login.js');
+    
+
+
+    }
+    
+    
     
     $final_validator = array_pop($form['#validate']);
        $form['#validate'][] = 'polaris_ils_login_validate';
@@ -103,21 +135,25 @@ function polaris_ils_form_alter(&$form, &$form_state, $form_id) {
 
 function polaris_ils_login_validate(&$form, &$form_state) {
   //CONNECT PATRON ID!
-  
   $gmtdiff = (date("O")*-1)/100;
   $gmt = time() + (60*60*$gmtdiff);
   $thisdate = date("D, j M Y H:i:s", $gmt);
   $thisdate .= " GMT";  
   $userid = $form["name"]["#value"];
   $pass = $form_state['values']["pass"];
-  $accessID = variable_get("polaris_ils_access_id");
-  $accessKey = variable_get("polaris_access_key");
+  $access_id = variable_get("polaris_ils_access_id");
+  $access_key = variable_get("polaris_access_key");
   $httpMethod = "GET";
-  $url = 'http://'.variable_get("polaris_url").'/PAPIService/REST/public/v1/1033/100/1/patron/'.$userid;
+  if (variable_get('polaris_url2')) {
+    $thisurl = variable_get('polaris_url2');
+  }
+  else {
+    $thisurl = variable_get('polaris_url');
+  }
+  $url = 'http://'. $thisurl .'/PAPIService/REST/public/v1/1033/100/1/patron/' . $userid;
   
-  
-  $login = polaris_ils_api_connect($accessID,
-      $accessKey,
+  $login = polaris_ils_api_connect($access_id,
+      $access_key,
       $httpMethod,
       $url,
       $thisdate,
@@ -129,7 +165,7 @@ function polaris_ils_login_validate(&$form, &$form_state) {
     $barcode = $xml->PatronBarcode;
     //print_r($xml);
     
-    $url = 'http://paccen01/PAPIService/REST/public/v1/1033/100/1/patron/'.$barcode.'/basicdata';
+    $url = 'http://'. $thisurl . '/PAPIService/REST/public/v1/1033/100/1/patron/'.$barcode.'/basicdata';
     $getinfo = polaris_ils_api_connect('drupal',
       '11CB1DE4-0A06-43C8-951C-F5FC33B4AD36',
       'GET',
@@ -138,7 +174,7 @@ function polaris_ils_login_validate(&$form, &$form_state) {
     $pass); 
     if ($getinfo) {
       $xml2 = simplexml_load_string($getinfo);
-      print_r($xml2);
+      //print_r($xml2);
       $patronID = $xml2->PatronBasicData->PatronID;
       $firstname = $xml2->PatronBasicData->NameFirst;
       $lastname = $xml2->PatronBasicData->NameLast;
@@ -208,7 +244,7 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 }
 
 
-function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $httpDate, $pwd='') 
+function polaris_ils_api_connect($access_id, $access_key, $httpMethod, $uri, $httpDate, $pwd='') 
   {
     //
     // Build combined string used to create hash
@@ -217,7 +253,7 @@ function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $http
     //
     // Create the hash using SHA1, the combined string and the PAPI Access Key associated with the PAPI Access ID
     //
-    $sha1_sig = base64_encode(hash_hmac('sha1', $concat, $accessKey, true));
+    $sha1_sig = base64_encode(hash_hmac('sha1', $concat, $access_key, true));
     
     //
     // Connect to PAPI Service and validate patron
@@ -225,13 +261,13 @@ function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $http
     $ch = curl_init();
     $headers = array( 
         "PolarisDate: ". $httpDate, 
-        "Authorization: PWS " . $accessID . ":" . $sha1_sig 
+        "Authorization: PWS " . $access_id . ":" . $sha1_sig 
         );
     $uri2 = $uri;
     
     if (variable_get('polaris_url2')) {
       
-      $uri2 = str_replace(variable_get('polaris_uri'), variable_get('polaris_url2'), $uri); 
+      $uri2 = str_replace(variable_get('polaris_uri2'), variable_get('polaris_url'), $uri); 
     }
     //curl_setopt($ch, CURLOPT_GET, 1);
     curl_setopt($ch, CURLOPT_URL, $uri2);
@@ -239,7 +275,33 @@ function polaris_ils_api_connect($accessID, $accessKey, $httpMethod, $uri, $http
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 
     $output = curl_exec($ch);
+
+//http://catalog.denverlibrary.org/logon.aspx?logoff=1&src=default.aspx
     
     return $output;
   }
+
+/*
+ * 
+ * Implementation of hook_user_logout()
+ */
+ /*
+function polaris_ils_user_logout($account) {
+  $url = 'http://' . variable_get('polaris_url') . '/Mobile/MyAccount/Logout';
+  $result = drupal_http_request($url);
+  print_r($result);
+  drupal_exit();
+}
+*/
+function polaris_ils_polaris_login() {
+  $polaris_url = variable_get('polaris_url', '');
+  $html = '<form method="post" id="polaris_login_form" action="http://' . $polaris_url . '/logon_ext.aspx">';
+  $html .= '<p>Username <input type="text" name="userid" id="userid" value=""></p>';
+  $html .= '<p>Password <input type="password" name="password" id="password" value=""></p>';
+  $html .= '<p><input type="submit" name="submit2" value="Submit" id="submit2"></p>';
+  $html .= '</form>'; 
+  echo $html;
+  drupal_exit();
+}
+
 
