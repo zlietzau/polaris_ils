@@ -177,14 +177,14 @@ function polaris_ils_login_validate(&$form, &$form_state) {
 
       }
       else {
-        drupal_set_message(t("Error creating your account"), 'error');
+        drupal_set_message("Error creating your account", 'error');
       }
       
       
     }
     else {
       
-      drupal_set_message(t("Error in processing - please try again"), 'error');
+      drupal_set_message("Error in processing - please try again", 'error');
       
     }
     
